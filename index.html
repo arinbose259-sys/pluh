@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Superhot - Dodge the Bullets</title>
+    <title>Superhot - Office Infiltration</title>
     <style>
         body { margin: 0; overflow: hidden; background: #fff; font-family: 'Courier New', Courier, monospace; }
         #overlay { position: absolute; width: 100%; height: 100%; background: rgba(255,255,255,0.9); 
@@ -19,8 +19,8 @@
 
     <div id="overlay">
         <h1 style="color:red; font-size: 60px; margin: 0;">SUPERHOT</h1>
-        <p><b>DODGE THE RED BULLETS</b></p>
-        <p>CLICK TO BEGIN</p>
+        <p><b>OFFICE LEVEL</b></p>
+        <p>CLICK TO START</p>
     </div>
     
     <div id="ui">KILLS: <span id="score">0</span></div>
@@ -45,63 +45,77 @@
             controls.addEventListener('unlock', () => document.getElementById('overlay').style.display = 'flex');
 
             scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+
+            // BUILDING THE ROOMS (Walls)
+            const wallMat = new THREE.MeshStandardMaterial({color: 0xeeeeee});
+            function createWall(x, z, w, d) {
+                const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 5, d), wallMat);
+                wall.position.set(x, 2.5, z);
+                scene.add(wall);
+                return wall;
+            }
+
+            // Simple Office Layout
+            createWall(0, -10, 20, 1);  // Back wall
+            createWall(10, 0, 1, 20);   // Right wall
+            createWall(-10, 0, 1, 20);  // Left wall
+            createWall(0, 10, 8, 1);    // Front wall left
+            createWall(7, 10, 6, 1);    // Front wall right (door in middle)
             
-            // Environment
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshPhongMaterial({ color: 0xeeeeee }));
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshPhongMaterial({ color: 0xffffff }));
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            // Game State
-            let playerBullets = [];
-            let enemyBullets = [];
-            let npcs = [];
+            let playerBullets = [], enemyBullets = [], npcs = [];
             let health = 100, score = 0, isShooting = false;
             let keys = { w: false, a: false, s: false, d: false };
 
-            function spawnNPC() {
-                const npc = new THREE.Group();
-                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.6, 16), new THREE.MeshStandardMaterial({color: 0xff0000}));
-                body.position.y = 0.8;
-                npc.add(body);
-                npc.position.set((Math.random()-0.5)*50, 0, (Math.random()-0.5)*50);
-                npc.userData = { shootCooldown: Math.random() * 100 };
-                scene.add(npc);
-                npcs.push(npc);
+            // HUMANOID ENEMY FACTORY
+            function spawnHumanoid() {
+                const group = new THREE.Group();
+                const mat = new THREE.MeshStandardMaterial({color: 0xff0000});
+                
+                // Torso
+                const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.8, 0.3), mat);
+                torso.position.y = 1.2;
+                group.add(torso);
+                
+                // Head
+                const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), mat);
+                head.position.y = 1.8;
+                group.add(head);
+
+                // Arms
+                const armL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.6, 0.15), mat);
+                armL.position.set(-0.35, 1.2, 0);
+                group.add(armL);
+                const armR = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.6, 0.15), mat);
+                armR.position.set(0.35, 1.2, 0);
+                group.add(armR);
+
+                group.position.set((Math.random()-0.5)*15, 0, (Math.random()-0.5)*15);
+                group.userData = { shootCooldown: Math.random() * 100 };
+                scene.add(group);
+                npcs.push(group);
             }
-            for(let i=0; i<5; i++) spawnNPC();
+            for(let i=0; i<4; i++) spawnHumanoid();
 
-            // Function to create a bullet with a trail
-            function createBullet(pos, targetPos, color, isEnemy) {
-                const bullet = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.1, 8, 8), 
-                    new THREE.MeshBasicMaterial({color: color})
-                );
-                
-                const trailGeo = new THREE.CylinderGeometry(0.05, 0.01, 1.5, 8);
-                const trailMat = new THREE.MeshBasicMaterial({color: color, transparent: true, opacity: 0.5});
-                const trail = new THREE.Mesh(trailGeo, trailMat);
-                trail.rotation.x = Math.PI / 2;
-                trail.position.z = 0.75;
-                bullet.add(trail);
-
-                bullet.position.copy(pos);
-                bullet.lookAt(targetPos);
-                
-                const direction = new THREE.Vector3().subVectors(targetPos, pos).normalize();
-                bullet.userData = { velocity: direction.multiplyScalar(0.25), isEnemy: isEnemy };
-                
-                scene.add(bullet);
-                return bullet;
+            function createBullet(pos, targetPos, color) {
+                const b = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), new THREE.MeshBasicMaterial({color: color}));
+                const trail = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.01, 1), new THREE.MeshBasicMaterial({color: color, transparent: true, opacity: 0.4}));
+                trail.rotation.x = Math.PI / 2; trail.position.z = 0.5; b.add(trail);
+                b.position.copy(pos); b.lookAt(targetPos);
+                const dir = new THREE.Vector3().subVectors(targetPos, pos).normalize();
+                b.userData = { velocity: dir.multiplyScalar(0.25) };
+                scene.add(b);
+                return b;
             }
 
-            // Player Shooting
             window.addEventListener('mousedown', () => {
                 if (!controls.isLocked) return;
-                isShooting = true;
-                setTimeout(() => { isShooting = false; }, 150);
-
+                isShooting = true; setTimeout(() => { isShooting = false; }, 150);
                 const target = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).add(camera.position);
-                playerBullets.push(createBullet(camera.position.clone().sub(new THREE.Vector3(0,0.2,0)), target, 0x000000, false));
+                playerBullets.push(createBullet(camera.position.clone().sub(new THREE.Vector3(0,0.2,0)), target, 0x000000));
             });
 
             document.addEventListener('keydown', e => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; });
@@ -111,59 +125,41 @@
                 requestAnimationFrame(animate);
                 if (controls.isLocked) {
                     const isMoving = keys.w || keys.a || keys.s || keys.d || isShooting;
-                    const timeScale = isMoving ? 1.0 : 0.02;
+                    const timeScale = isMoving ? 1.0 : 0.03;
 
-                    if(keys.w) controls.moveForward(0.15); 
-                    if(keys.s) controls.moveForward(-0.15);
-                    if(keys.a) controls.moveRight(-0.1); 
-                    if(keys.d) controls.moveRight(0.1);
+                    if(keys.w) controls.moveForward(0.1); if(keys.s) controls.moveForward(-0.1);
+                    if(keys.a) controls.moveRight(-0.08); if(keys.d) controls.moveRight(0.08);
 
-                    // Update Player Bullets
+                    // Player Bullets
                     for (let i = playerBullets.length - 1; i >= 0; i--) {
                         const b = playerBullets[i];
                         b.position.add(b.userData.velocity.clone().multiplyScalar(timeScale));
                         npcs.forEach((npc, nIdx) => {
-                            if (b.position.distanceTo(npc.position.clone().add(new THREE.Vector3(0,1,0))) < 1) {
-                                scene.remove(npc);
-                                npcs.splice(nIdx, 1);
-                                scene.remove(b);
-                                playerBullets.splice(i, 1);
-                                score++;
-                                document.getElementById('score').innerText = score;
-                                spawnNPC();
+                            if (b.position.distanceTo(npc.position.clone().add(new THREE.Vector3(0,1,0))) < 0.8) {
+                                scene.remove(npc); npcs.splice(nIdx, 1);
+                                scene.remove(b); playerBullets.splice(i, 1);
+                                score++; document.getElementById('score').innerText = score;
+                                spawnHumanoid();
                             }
                         });
-                        if (b.position.length() > 100) { scene.remove(b); playerBullets.splice(i, 1); }
                     }
 
-                    // Update Enemy Bullets (The ones you dodge!)
+                    // Enemy Bullets
                     for (let i = enemyBullets.length - 1; i >= 0; i--) {
                         const b = enemyBullets[i];
                         b.position.add(b.userData.velocity.clone().multiplyScalar(timeScale));
-                        
-                        // Check if it hits player
                         if (b.position.distanceTo(camera.position) < 0.5) {
-                            health -= 34; // 3 hits and you're out
-                            document.getElementById('health-fill').style.width = health + '%';
-                            scene.remove(b);
-                            enemyBullets.splice(i, 1);
-                            if(health <= 0) { alert("GAME OVER"); location.reload(); }
+                            health -= 34; document.getElementById('health-fill').style.width = health + '%';
+                            scene.remove(b); enemyBullets.splice(i, 1);
+                            if(health <= 0) { alert("SUPER... HOT..."); location.reload(); }
                         }
-                        if (b.position.length() > 100) { scene.remove(b); enemyBullets.splice(i, 1); }
                     }
 
-                    // Enemy Logic
                     npcs.forEach(npc => {
                         npc.lookAt(camera.position.x, 0, camera.position.z);
-                        const dist = npc.position.distanceTo(camera.position);
-                        
-                        if (dist > 10) npc.translateZ(0.05 * timeScale);
-                        
                         npc.userData.shootCooldown += timeScale;
-                        if (npc.userData.shootCooldown > 120 && dist < 30) {
-                            // ENEMY FIRES!
-                            const spawnPos = npc.position.clone().add(new THREE.Vector3(0, 1.2, 0));
-                            enemyBullets.push(createBullet(spawnPos, camera.position, 0xff0000, true));
+                        if (npc.userData.shootCooldown > 100) {
+                            enemyBullets.push(createBullet(npc.position.clone().add(new THREE.Vector3(0,1.5,0)), camera.position, 0xff0000));
                             npc.userData.shootCooldown = 0;
                         }
                     });
