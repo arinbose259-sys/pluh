@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Superhot - Bullet Trails</title>
+    <title>Superhot - Dodge the Bullets</title>
     <style>
         body { margin: 0; overflow: hidden; background: #fff; font-family: 'Courier New', Courier, monospace; }
         #overlay { position: absolute; width: 100%; height: 100%; background: rgba(255,255,255,0.9); 
@@ -19,7 +19,7 @@
 
     <div id="overlay">
         <h1 style="color:red; font-size: 60px; margin: 0;">SUPERHOT</h1>
-        <p><b>TIME MOVES WHEN YOU MOVE</b></p>
+        <p><b>DODGE THE RED BULLETS</b></p>
         <p>CLICK TO BEGIN</p>
     </div>
     
@@ -44,28 +44,16 @@
             controls.addEventListener('lock', () => document.getElementById('overlay').style.display = 'none');
             controls.addEventListener('unlock', () => document.getElementById('overlay').style.display = 'flex');
 
-            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-            const sun = new THREE.DirectionalLight(0xffffff, 0.5);
-            sun.position.set(10, 20, 10);
-            scene.add(sun);
-
-            // World setup
+            scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+            
+            // Environment
             const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshPhongMaterial({ color: 0xeeeeee }));
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            for(let i=0; i<15; i++) {
-                const box = new THREE.Mesh(new THREE.BoxGeometry(2, 6, 2), new THREE.MeshStandardMaterial({color: 0xcccccc}));
-                box.position.set((Math.random()-0.5)*50, 3, (Math.random()-0.5)*50);
-                scene.add(box);
-            }
-
-            const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.5), new THREE.MeshStandardMaterial({color: 0x111111}));
-            gun.position.set(0.25, -0.25, -0.5);
-            camera.add(gun);
-            scene.add(camera);
-
-            let bullets = [];
+            // Game State
+            let playerBullets = [];
+            let enemyBullets = [];
             let npcs = [];
             let health = 100, score = 0, isShooting = false;
             let keys = { w: false, a: false, s: false, d: false };
@@ -75,45 +63,45 @@
                 const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.6, 16), new THREE.MeshStandardMaterial({color: 0xff0000}));
                 body.position.y = 0.8;
                 npc.add(body);
-                npc.position.set((Math.random()-0.5)*60, 0, (Math.random()-0.5)*60);
-                npc.userData = { attackTimer: Math.random() * 50 };
+                npc.position.set((Math.random()-0.5)*50, 0, (Math.random()-0.5)*50);
+                npc.userData = { shootCooldown: Math.random() * 100 };
                 scene.add(npc);
                 npcs.push(npc);
             }
-            for(let i=0; i<6; i++) spawnNPC();
+            for(let i=0; i<5; i++) spawnNPC();
 
-            // Fire Bullet with Trail
-            window.addEventListener('mousedown', () => {
-                if (!controls.isLocked) return;
-                
-                isShooting = true;
-                setTimeout(() => { isShooting = false; }, 200);
-
-                // The Bullet Head
+            // Function to create a bullet with a trail
+            function createBullet(pos, targetPos, color, isEnemy) {
                 const bullet = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.08, 8, 8), 
-                    new THREE.MeshBasicMaterial({color: 0xff4400})
+                    new THREE.SphereGeometry(0.1, 8, 8), 
+                    new THREE.MeshBasicMaterial({color: color})
                 );
                 
-                // The Trail
-                const trailGeo = new THREE.CylinderGeometry(0.04, 0.01, 1.5, 8);
-                const trailMat = new THREE.MeshBasicMaterial({color: 0xffaa00, transparent: true, opacity: 0.6});
+                const trailGeo = new THREE.CylinderGeometry(0.05, 0.01, 1.5, 8);
+                const trailMat = new THREE.MeshBasicMaterial({color: color, transparent: true, opacity: 0.5});
                 const trail = new THREE.Mesh(trailGeo, trailMat);
-                
                 trail.rotation.x = Math.PI / 2;
-                trail.position.z = 0.75; // Offset trail behind head
+                trail.position.z = 0.75;
                 bullet.add(trail);
 
-                const direction = new THREE.Vector3(0, 0, -1);
-                direction.applyQuaternion(camera.quaternion);
+                bullet.position.copy(pos);
+                bullet.lookAt(targetPos);
                 
-                bullet.position.copy(camera.position);
-                bullet.quaternion.copy(camera.quaternion);
+                const direction = new THREE.Vector3().subVectors(targetPos, pos).normalize();
+                bullet.userData = { velocity: direction.multiplyScalar(0.25), isEnemy: isEnemy };
                 
-                // Velocity is MUCH slower now (0.2 instead of 0.8)
-                bullet.userData = { velocity: direction.multiplyScalar(0.2) }; 
                 scene.add(bullet);
-                bullets.push(bullet);
+                return bullet;
+            }
+
+            // Player Shooting
+            window.addEventListener('mousedown', () => {
+                if (!controls.isLocked) return;
+                isShooting = true;
+                setTimeout(() => { isShooting = false; }, 150);
+
+                const target = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).add(camera.position);
+                playerBullets.push(createBullet(camera.position.clone().sub(new THREE.Vector3(0,0.2,0)), target, 0x000000, false));
             });
 
             document.addEventListener('keydown', e => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; });
@@ -123,49 +111,60 @@
                 requestAnimationFrame(animate);
                 if (controls.isLocked) {
                     const isMoving = keys.w || keys.a || keys.s || keys.d || isShooting;
-                    const timeScale = isMoving ? 1.0 : 0.02; // Very slow when still
+                    const timeScale = isMoving ? 1.0 : 0.02;
 
-                    if(keys.w) controls.moveForward(0.12); 
-                    if(keys.s) controls.moveForward(-0.12);
-                    if(keys.a) controls.moveRight(-0.08); 
-                    if(keys.d) controls.moveRight(0.08);
+                    if(keys.w) controls.moveForward(0.15); 
+                    if(keys.s) controls.moveForward(-0.15);
+                    if(keys.a) controls.moveRight(-0.1); 
+                    if(keys.d) controls.moveRight(0.1);
 
-                    // Move Bullets
-                    for (let i = bullets.length - 1; i >= 0; i--) {
-                        const b = bullets[i];
-                        // Apply timescale to bullet movement
+                    // Update Player Bullets
+                    for (let i = playerBullets.length - 1; i >= 0; i--) {
+                        const b = playerBullets[i];
                         b.position.add(b.userData.velocity.clone().multiplyScalar(timeScale));
-
-                        // Collision with NPCs
                         npcs.forEach((npc, nIdx) => {
                             if (b.position.distanceTo(npc.position.clone().add(new THREE.Vector3(0,1,0))) < 1) {
                                 scene.remove(npc);
                                 npcs.splice(nIdx, 1);
                                 scene.remove(b);
-                                bullets.splice(i, 1);
+                                playerBullets.splice(i, 1);
                                 score++;
                                 document.getElementById('score').innerText = score;
                                 spawnNPC();
                             }
                         });
-
-                        if (b.position.length() > 80) {
-                            scene.remove(b);
-                            bullets.splice(i, 1);
-                        }
+                        if (b.position.length() > 100) { scene.remove(b); playerBullets.splice(i, 1); }
                     }
 
+                    // Update Enemy Bullets (The ones you dodge!)
+                    for (let i = enemyBullets.length - 1; i >= 0; i--) {
+                        const b = enemyBullets[i];
+                        b.position.add(b.userData.velocity.clone().multiplyScalar(timeScale));
+                        
+                        // Check if it hits player
+                        if (b.position.distanceTo(camera.position) < 0.5) {
+                            health -= 34; // 3 hits and you're out
+                            document.getElementById('health-fill').style.width = health + '%';
+                            scene.remove(b);
+                            enemyBullets.splice(i, 1);
+                            if(health <= 0) { alert("GAME OVER"); location.reload(); }
+                        }
+                        if (b.position.length() > 100) { scene.remove(b); enemyBullets.splice(i, 1); }
+                    }
+
+                    // Enemy Logic
                     npcs.forEach(npc => {
                         npc.lookAt(camera.position.x, 0, camera.position.z);
                         const dist = npc.position.distanceTo(camera.position);
-                        if (dist > 3) npc.translateZ(0.04 * timeScale);
                         
-                        npc.userData.attackTimer += timeScale;
-                        if (npc.userData.attackTimer > 150 && dist < 15) {
-                            health -= 20;
-                            document.getElementById('health-fill').style.width = health + '%';
-                            npc.userData.attackTimer = 0;
-                            if(health <= 0) { alert("SUPER... HOT... (Score: " + score + ")"); location.reload(); }
+                        if (dist > 10) npc.translateZ(0.05 * timeScale);
+                        
+                        npc.userData.shootCooldown += timeScale;
+                        if (npc.userData.shootCooldown > 120 && dist < 30) {
+                            // ENEMY FIRES!
+                            const spawnPos = npc.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+                            enemyBullets.push(createBullet(spawnPos, camera.position, 0xff0000, true));
+                            npc.userData.shootCooldown = 0;
                         }
                     });
                 }
