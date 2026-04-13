@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Superhot Web Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #fff; font-family: 'Courier New', Courier, monospace; }
+        #overlay { position: absolute; width: 100%; height: 100%; background: rgba(255,255,255,0.9); 
+                   display: flex; flex-direction: column; align-items: center; justify-content: center; 
+                   color: black; cursor: pointer; z-index: 100; text-transform: uppercase; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #000; font-size: 24px; font-weight: bold; z-index: 10; }
+        #health-bar { position: absolute; bottom: 20px; left: 20px; width: 200px; height: 10px; border: 2px solid #f00; z-index: 10; }
+        #health-fill { width: 100%; height: 100%; background: #f00; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 12px; height: 12px; 
+                     border: 2px solid #000; border-radius: 50%; transform: translate(-50%, -50%); z-index: 10; }
+    </style>
+</head>
+<body>
+
+    <div id="overlay">
+        <h1 style="color:red; font-size: 60px; margin: 0;">SUPERHOT</h1>
+        <p><b>TIME MOVES WHEN YOU MOVE</b></p>
+        <p>CLICK TO BEGIN</p>
+    </div>
+    
+    <div id="ui">KILLS: <span id="score">0</span></div>
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <div id="crosshair"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/js/controls/PointerLockControls.js"></script>
+
+    <script>
+        window.onload = () => {
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xffffff);
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            const controls = new THREE.PointerLockControls(camera, document.body);
+            document.getElementById('overlay').addEventListener('click', () => controls.lock());
+            controls.addEventListener('lock', () => document.getElementById('overlay').style.display = 'none');
+            controls.addEventListener('unlock', () => document.getElementById('overlay').style.display = 'flex');
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.5);
+            sun.position.set(10, 20, 10);
+            scene.add(sun);
+
+            // Floor & Obstacles
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshPhongMaterial({ color: 0xdddddd }));
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            const obstacles = [];
+            for(let i=0; i<15; i++) {
+                const box = new THREE.Mesh(new THREE.BoxGeometry(2, 6, 2), new THREE.MeshStandardMaterial({color: 0xcccccc}));
+                box.position.set((Math.random()-0.5)*40, 3, (Math.random()-0.5)*40);
+                scene.add(box);
+                obstacles.push(box);
+            }
+
+            // Gun
+            const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.6), new THREE.MeshStandardMaterial({color: 0x111111}));
+            gun.position.set(0.25, -0.25, -0.5);
+            camera.add(gun);
+            scene.add(camera);
+
+            // Game State
+            let bullets = [];
+            let npcs = [];
+            let health = 100, score = 0, isShooting = false;
+            let keys = { w: false, a: false, s: false, d: false };
+
+            function spawnNPC() {
+                const npc = new THREE.Group();
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.6, 16), new THREE.MeshStandardMaterial({color: 0xff0000}));
+                body.position.y = 0.8;
+                npc.add(body);
+                npc.position.set((Math.random()-0.5)*60, 0, (Math.random()-0.5)*60);
+                npc.userData = { attackTimer: Math.random() * 50 };
+                scene.add(npc);
+                npcs.push(npc);
+            }
+            for(let i=0; i<6; i++) spawnNPC();
+
+            // Fire Bullet Function
+            window.addEventListener('mousedown', () => {
+                if (!controls.isLocked) return;
+                
+                // Muzzle Flash
+                gun.material.color.setHex(0xffff00);
+                isShooting = true;
+                setTimeout(() => { 
+                    gun.material.color.setHex(0x111111);
+                    isShooting = false; 
+                }, 200);
+
+                const bullet = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.03, 0.03, 0.8), 
+                    new THREE.MeshBasicMaterial({color: 0xffcc00})
+                );
+                
+                // Position bullet at gun
+                const vector = new THREE.Vector3(0, 0, -1);
+                vector.applyQuaternion(camera.quaternion);
+                
+                bullet.position.copy(camera.position);
+                bullet.quaternion.copy(camera.quaternion);
+                bullet.rotateX(Math.PI/2); // Make it point forward
+                
+                bullet.userData = { velocity: vector.multiplyScalar(0.8) }; // Slow bullet speed
+                scene.add(bullet);
+                bullets.push(bullet);
+            });
+
+            document.addEventListener('keydown', e => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; });
+            document.addEventListener('keyup', e => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; });
+
+            function animate() {
+                requestAnimationFrame(animate);
+                if (controls.isLocked) {
+                    const isMoving = keys.w || keys.a || keys.s || keys.d || isShooting;
+                    const timeScale = isMoving ? 1.0 : 0.03;
+
+                    // Movement
+                    if(keys.w) controls.moveForward(0.12); 
+                    if(keys.s) controls.moveForward(-0.12);
+                    if(keys.a) controls.moveRight(-0.08); 
+                    if(keys.d) controls.moveRight(0.08);
+
+                    // Update Bullets
+                    for (let i = bullets.length - 1; i >= 0; i--) {
+                        const b = bullets[i];
+                        b.position.add(b.userData.velocity.clone().multiplyScalar(timeScale));
+
+                        // Hit detection for NPCs
+                        npcs.forEach((npc, nIdx) => {
+                            if (b.position.distanceTo(npc.position) < 1.2) {
+                                scene.remove(npc);
+                                npcs.splice(nIdx, 1);
+                                scene.remove(b);
+                                bullets.splice(i, 1);
+                                score++;
+                                document.getElementById('score').innerText = score;
+                                spawnNPC();
+                            }
+                        });
+
+                        // Remove old bullets
+                        if (b.position.length() > 100) {
+                            scene.remove(b);
+                            bullets.splice(i, 1);
+                        }
+                    }
+
+                    // NPC AI
+                    npcs.forEach(npc => {
+                        npc.lookAt(camera.position.x, 0, camera.position.z);
+                        const dist = npc.position.distanceTo(camera.position);
+                        if (dist > 3) npc.translateZ(0.05 * timeScale);
+                        
+                        npc.userData.attackTimer += timeScale;
+                        if (npc.userData.attackTimer > 120 && dist < 20) {
+                            health -= 15;
+                            document.getElementById('health-fill').style.width = health + '%';
+                            npc.userData.attackTimer = 0;
+                            if(health <= 0) { alert("GAME OVER! KILLS: " + score); location.reload(); }
+                        }
+                    });
+                }
+                renderer.render(scene, camera);
+            }
+            animate();
+        };
+    </script>
+</body>
+</html>
