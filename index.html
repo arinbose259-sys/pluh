@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Superhot Web Edition</title>
+    <title>Superhot - Bullet Trails</title>
     <style>
         body { margin: 0; overflow: hidden; background: #fff; font-family: 'Courier New', Courier, monospace; }
         #overlay { position: absolute; width: 100%; height: 100%; background: rgba(255,255,255,0.9); 
@@ -44,31 +44,27 @@
             controls.addEventListener('lock', () => document.getElementById('overlay').style.display = 'none');
             controls.addEventListener('unlock', () => document.getElementById('overlay').style.display = 'flex');
 
-            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
             const sun = new THREE.DirectionalLight(0xffffff, 0.5);
             sun.position.set(10, 20, 10);
             scene.add(sun);
 
-            // Floor & Obstacles
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshPhongMaterial({ color: 0xdddddd }));
+            // World setup
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshPhongMaterial({ color: 0xeeeeee }));
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            const obstacles = [];
             for(let i=0; i<15; i++) {
                 const box = new THREE.Mesh(new THREE.BoxGeometry(2, 6, 2), new THREE.MeshStandardMaterial({color: 0xcccccc}));
-                box.position.set((Math.random()-0.5)*40, 3, (Math.random()-0.5)*40);
+                box.position.set((Math.random()-0.5)*50, 3, (Math.random()-0.5)*50);
                 scene.add(box);
-                obstacles.push(box);
             }
 
-            // Gun
-            const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.6), new THREE.MeshStandardMaterial({color: 0x111111}));
+            const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.5), new THREE.MeshStandardMaterial({color: 0x111111}));
             gun.position.set(0.25, -0.25, -0.5);
             camera.add(gun);
             scene.add(camera);
 
-            // Game State
             let bullets = [];
             let npcs = [];
             let health = 100, score = 0, isShooting = false;
@@ -86,32 +82,36 @@
             }
             for(let i=0; i<6; i++) spawnNPC();
 
-            // Fire Bullet Function
+            // Fire Bullet with Trail
             window.addEventListener('mousedown', () => {
                 if (!controls.isLocked) return;
                 
-                // Muzzle Flash
-                gun.material.color.setHex(0xffff00);
                 isShooting = true;
-                setTimeout(() => { 
-                    gun.material.color.setHex(0x111111);
-                    isShooting = false; 
-                }, 200);
+                setTimeout(() => { isShooting = false; }, 200);
 
+                // The Bullet Head
                 const bullet = new THREE.Mesh(
-                    new THREE.CylinderGeometry(0.03, 0.03, 0.8), 
-                    new THREE.MeshBasicMaterial({color: 0xffcc00})
+                    new THREE.SphereGeometry(0.08, 8, 8), 
+                    new THREE.MeshBasicMaterial({color: 0xff4400})
                 );
                 
-                // Position bullet at gun
-                const vector = new THREE.Vector3(0, 0, -1);
-                vector.applyQuaternion(camera.quaternion);
+                // The Trail
+                const trailGeo = new THREE.CylinderGeometry(0.04, 0.01, 1.5, 8);
+                const trailMat = new THREE.MeshBasicMaterial({color: 0xffaa00, transparent: true, opacity: 0.6});
+                const trail = new THREE.Mesh(trailGeo, trailMat);
+                
+                trail.rotation.x = Math.PI / 2;
+                trail.position.z = 0.75; // Offset trail behind head
+                bullet.add(trail);
+
+                const direction = new THREE.Vector3(0, 0, -1);
+                direction.applyQuaternion(camera.quaternion);
                 
                 bullet.position.copy(camera.position);
                 bullet.quaternion.copy(camera.quaternion);
-                bullet.rotateX(Math.PI/2); // Make it point forward
                 
-                bullet.userData = { velocity: vector.multiplyScalar(0.8) }; // Slow bullet speed
+                // Velocity is MUCH slower now (0.2 instead of 0.8)
+                bullet.userData = { velocity: direction.multiplyScalar(0.2) }; 
                 scene.add(bullet);
                 bullets.push(bullet);
             });
@@ -123,22 +123,22 @@
                 requestAnimationFrame(animate);
                 if (controls.isLocked) {
                     const isMoving = keys.w || keys.a || keys.s || keys.d || isShooting;
-                    const timeScale = isMoving ? 1.0 : 0.03;
+                    const timeScale = isMoving ? 1.0 : 0.02; // Very slow when still
 
-                    // Movement
                     if(keys.w) controls.moveForward(0.12); 
                     if(keys.s) controls.moveForward(-0.12);
                     if(keys.a) controls.moveRight(-0.08); 
                     if(keys.d) controls.moveRight(0.08);
 
-                    // Update Bullets
+                    // Move Bullets
                     for (let i = bullets.length - 1; i >= 0; i--) {
                         const b = bullets[i];
+                        // Apply timescale to bullet movement
                         b.position.add(b.userData.velocity.clone().multiplyScalar(timeScale));
 
-                        // Hit detection for NPCs
+                        // Collision with NPCs
                         npcs.forEach((npc, nIdx) => {
-                            if (b.position.distanceTo(npc.position) < 1.2) {
+                            if (b.position.distanceTo(npc.position.clone().add(new THREE.Vector3(0,1,0))) < 1) {
                                 scene.remove(npc);
                                 npcs.splice(nIdx, 1);
                                 scene.remove(b);
@@ -149,25 +149,23 @@
                             }
                         });
 
-                        // Remove old bullets
-                        if (b.position.length() > 100) {
+                        if (b.position.length() > 80) {
                             scene.remove(b);
                             bullets.splice(i, 1);
                         }
                     }
 
-                    // NPC AI
                     npcs.forEach(npc => {
                         npc.lookAt(camera.position.x, 0, camera.position.z);
                         const dist = npc.position.distanceTo(camera.position);
-                        if (dist > 3) npc.translateZ(0.05 * timeScale);
+                        if (dist > 3) npc.translateZ(0.04 * timeScale);
                         
                         npc.userData.attackTimer += timeScale;
-                        if (npc.userData.attackTimer > 120 && dist < 20) {
-                            health -= 15;
+                        if (npc.userData.attackTimer > 150 && dist < 15) {
+                            health -= 20;
                             document.getElementById('health-fill').style.width = health + '%';
                             npc.userData.attackTimer = 0;
-                            if(health <= 0) { alert("GAME OVER! KILLS: " + score); location.reload(); }
+                            if(health <= 0) { alert("SUPER... HOT... (Score: " + score + ")"); location.reload(); }
                         }
                     });
                 }
